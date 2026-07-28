@@ -117,24 +117,10 @@ func SetupTools(mcpServer *mcp.Server, opts ObsMCPOptions) error {
 	}
 
 	if slices.Contains(opts.Toolsets, metrics.ToolsetName) {
-		mcp.AddTool(mcpServer, metrics.ListMetrics.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.ListMetrics.Name, opts.toolMetrics, ListMetricsHandler(opts)))
-		mcp.AddTool(mcpServer, metrics.ExecuteInstantQuery.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.ExecuteInstantQuery.Name, opts.toolMetrics, ExecuteInstantQueryHandler(opts)))
-		mcp.AddTool(mcpServer, metrics.ExecuteRangeQuery.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.ExecuteRangeQuery.Name, opts.toolMetrics, ExecuteRangeQueryHandler(opts)))
-		mcp.AddTool(mcpServer, metrics.ShowTimeseries.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.ShowTimeseries.Name, opts.toolMetrics, ShowTimeseriesHandler(opts)))
-		mcp.AddTool(mcpServer, metrics.GetLabelNames.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.GetLabelNames.Name, opts.toolMetrics, GetLabelNamesHandler(opts)))
-		mcp.AddTool(mcpServer, metrics.GetLabelValues.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.GetLabelValues.Name, opts.toolMetrics, GetLabelValuesHandler(opts)))
-		mcp.AddTool(mcpServer, metrics.GetSeries.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.GetSeries.Name, opts.toolMetrics, GetSeriesHandler(opts)))
-		mcp.AddTool(mcpServer, metrics.GetAlerts.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.GetAlerts.Name, opts.toolMetrics, GetAlertsHandler(opts)))
-		mcp.AddTool(mcpServer, metrics.GetSilences.ToMCPTool(),
-			instrumentation.ToolHandler(metrics.GetSilences.Name, opts.toolMetrics, GetSilencesHandler(opts)))
+		err := addToolset(mcpServer, mgr, &metrics.Toolset{}, opts.Metrics, opts.toolMetrics)
+		if err != nil {
+			return err
+		}
 	}
 
 	if slices.Contains(opts.Toolsets, traces.ToolsetName) {

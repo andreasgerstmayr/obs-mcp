@@ -7,25 +7,38 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	tools "github.com/rhobs/obs-mcp/pkg/metrics"
+	"github.com/rhobs/obs-mcp/pkg/metrics"
 )
+
+func createListMetricsTool() mcp.Tool {
+	return toolsetToMCPTools(&metrics.Toolset{})[0]
+}
+
+func createExecuteRangeQueryTool() mcp.Tool {
+	for _, t := range toolsetToMCPTools(&metrics.Toolset{}) {
+		if t.Name == "execute_range_query" {
+			return t
+		}
+	}
+	panic("execute_range_query tool not found")
+}
 
 func TestListMetricsOutputSerialization(t *testing.T) {
 	tests := []struct {
 		name  string
-		input tools.ListMetricsOutput
+		input metrics.ListMetricsOutput
 	}{
 		{
 			name:  "empty",
-			input: tools.ListMetricsOutput{Metrics: []string{}},
+			input: metrics.ListMetricsOutput{Metrics: []string{}},
 		},
 		{
 			name:  "single metric",
-			input: tools.ListMetricsOutput{Metrics: []string{"up"}},
+			input: metrics.ListMetricsOutput{Metrics: []string{"up"}},
 		},
 		{
 			name:  "multiple metrics",
-			input: tools.ListMetricsOutput{Metrics: []string{"up", "node_cpu_seconds_total", "go_goroutines"}},
+			input: metrics.ListMetricsOutput{Metrics: []string{"up", "node_cpu_seconds_total", "go_goroutines"}},
 		},
 	}
 
@@ -36,7 +49,7 @@ func TestListMetricsOutputSerialization(t *testing.T) {
 				t.Fatalf("marshal failed: %v", err)
 			}
 
-			var result tools.ListMetricsOutput
+			var result metrics.ListMetricsOutput
 			if err := json.Unmarshal(data, &result); err != nil {
 				t.Fatalf("unmarshal failed: %v", err)
 			}
@@ -47,13 +60,13 @@ func TestListMetricsOutputSerialization(t *testing.T) {
 func TestRangeQueryOutputSerialization(t *testing.T) {
 	tests := []struct {
 		name  string
-		input tools.RangeQueryOutput
+		input metrics.RangeQueryOutput
 	}{
 		{
 			name: "matrix single series",
-			input: tools.RangeQueryOutput{
+			input: metrics.RangeQueryOutput{
 				ResultType: "matrix",
-				Result: []tools.SeriesResult{{
+				Result: []metrics.SeriesResult{{
 					Metric: map[string]string{"__name__": "up"},
 					Values: [][]any{{1700000000.0, "1"}},
 				}},
@@ -61,9 +74,9 @@ func TestRangeQueryOutputSerialization(t *testing.T) {
 		},
 		{
 			name: "matrix multiple series",
-			input: tools.RangeQueryOutput{
+			input: metrics.RangeQueryOutput{
 				ResultType: "matrix",
-				Result: []tools.SeriesResult{
+				Result: []metrics.SeriesResult{
 					{Metric: map[string]string{"job": "a"}, Values: [][]any{}},
 					{Metric: map[string]string{"job": "b"}, Values: [][]any{}},
 					{Metric: map[string]string{"job": "c"}, Values: [][]any{}},
@@ -72,16 +85,16 @@ func TestRangeQueryOutputSerialization(t *testing.T) {
 		},
 		{
 			name: "empty result",
-			input: tools.RangeQueryOutput{
+			input: metrics.RangeQueryOutput{
 				ResultType: "matrix",
-				Result:     []tools.SeriesResult{},
+				Result:     []metrics.SeriesResult{},
 			},
 		},
 		{
 			name: "vector result",
-			input: tools.RangeQueryOutput{
+			input: metrics.RangeQueryOutput{
 				ResultType: "vector",
-				Result: []tools.SeriesResult{{
+				Result: []metrics.SeriesResult{{
 					Metric: map[string]string{"__name__": "up"},
 					Values: [][]any{{1700000000.0, "1"}},
 				}},
@@ -89,9 +102,9 @@ func TestRangeQueryOutputSerialization(t *testing.T) {
 		},
 		{
 			name: "scalar result",
-			input: tools.RangeQueryOutput{
+			input: metrics.RangeQueryOutput{
 				ResultType: "scalar",
-				Result: []tools.SeriesResult{{
+				Result: []metrics.SeriesResult{{
 					Metric: map[string]string{},
 					Values: [][]any{{1700000000.0, "42"}},
 				}},
@@ -99,9 +112,9 @@ func TestRangeQueryOutputSerialization(t *testing.T) {
 		},
 		{
 			name: "with warnings",
-			input: tools.RangeQueryOutput{
+			input: metrics.RangeQueryOutput{
 				ResultType: "matrix",
-				Result:     []tools.SeriesResult{},
+				Result:     []metrics.SeriesResult{},
 				Warnings:   []string{"warning1", "warning2"},
 			},
 		},
@@ -114,7 +127,7 @@ func TestRangeQueryOutputSerialization(t *testing.T) {
 				t.Fatalf("marshal failed: %v", err)
 			}
 
-			var result tools.RangeQueryOutput
+			var result metrics.RangeQueryOutput
 			if err := json.Unmarshal(data, &result); err != nil {
 				t.Fatalf("unmarshal failed: %v", err)
 			}
@@ -125,25 +138,25 @@ func TestRangeQueryOutputSerialization(t *testing.T) {
 func TestSeriesResultSerialization(t *testing.T) {
 	tests := []struct {
 		name  string
-		input tools.SeriesResult
+		input metrics.SeriesResult
 	}{
 		{
 			name: "with labels and values",
-			input: tools.SeriesResult{
+			input: metrics.SeriesResult{
 				Metric: map[string]string{"__name__": "up", "job": "prometheus"},
 				Values: [][]any{{1700000000.0, "1"}, {1700000060.0, "1"}},
 			},
 		},
 		{
 			name: "empty",
-			input: tools.SeriesResult{
+			input: metrics.SeriesResult{
 				Metric: map[string]string{},
 				Values: [][]any{},
 			},
 		},
 		{
 			name: "many labels",
-			input: tools.SeriesResult{
+			input: metrics.SeriesResult{
 				Metric: map[string]string{
 					"__name__": "http_requests", "method": "GET", "status": "200",
 					"handler": "/api", "instance": "localhost:9090",
@@ -160,7 +173,7 @@ func TestSeriesResultSerialization(t *testing.T) {
 				t.Fatalf("marshal failed: %v", err)
 			}
 
-			var result tools.SeriesResult
+			var result metrics.SeriesResult
 			if err := json.Unmarshal(data, &result); err != nil {
 				t.Fatalf("unmarshal failed: %v", err)
 			}
@@ -175,12 +188,12 @@ func TestToolParameters(t *testing.T) {
 		expectedOptional []string
 	}{
 		{
-			tool:             CreateListMetricsTool(),
+			tool:             createListMetricsTool(),
 			expectedRequired: []string{"name_regex"},
 			expectedOptional: []string{},
 		},
 		{
-			tool:             CreateExecuteRangeQueryTool(),
+			tool:             createExecuteRangeQueryTool(),
 			expectedRequired: []string{"query", "step"},
 			expectedOptional: []string{"start", "end", "duration"},
 		},
@@ -258,11 +271,11 @@ func TestToolPatternValidation(t *testing.T) {
 		params []paramPatternTest
 	}{
 		{
-			tool:   CreateListMetricsTool(),
+			tool:   createListMetricsTool(),
 			params: []paramPatternTest{}, // no parameters
 		},
 		{
-			tool: CreateExecuteRangeQueryTool(),
+			tool: createExecuteRangeQueryTool(),
 			params: []paramPatternTest{
 				{
 					param:         "step",
@@ -354,8 +367,8 @@ func TestToolPatternValidation(t *testing.T) {
 
 func TestToolsHaveOutputSchema(t *testing.T) {
 	toolsToTest := []mcp.Tool{
-		CreateListMetricsTool(),
-		CreateExecuteRangeQueryTool(),
+		createListMetricsTool(),
+		createExecuteRangeQueryTool(),
 	}
 
 	if len(toolsToTest) == 0 {

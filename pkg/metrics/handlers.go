@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containers/kubernetes-mcp-server/pkg/api"
 	ammodels "github.com/prometheus/alertmanager/api/v2/models"
 	"github.com/prometheus/common/model"
 	"k8s.io/utils/ptr"
 
 	"github.com/rhobs/obs-mcp/pkg/metrics/alertmanager"
 	"github.com/rhobs/obs-mcp/pkg/metrics/prometheus"
-	"github.com/rhobs/obs-mcp/pkg/resultutil"
 )
 
 const (
@@ -22,8 +22,8 @@ const (
 	millisecondsPerSecond = 1000
 )
 
-// GetString is a helper to extract a string parameter with a default value
-func GetString(params map[string]any, key, defaultValue string) string {
+// getString is a helper to extract a string parameter with a default value.
+func getString(params map[string]any, key, defaultValue string) string {
 	if val, ok := params[key]; ok {
 		if str, ok := val.(string); ok && str != "" {
 			return str
@@ -32,22 +32,8 @@ func GetString(params map[string]any, key, defaultValue string) string {
 	return defaultValue
 }
 
-// GetInt is a helper to extract an integer parameter with a default value.
-// JSON numbers arrive as float64, so this handles the float64-to-int conversion.
-func GetInt(params map[string]any, key string, defaultValue int) int {
-	if val, ok := params[key]; ok {
-		switch v := val.(type) {
-		case float64:
-			return int(v)
-		case int:
-			return v
-		}
-	}
-	return defaultValue
-}
-
-// GetBoolPtr is a helper to extract an optional boolean parameter as a pointer
-func GetBoolPtr(params map[string]any, key string) *bool {
+// getBoolPtr is a helper to extract an optional boolean parameter as a pointer.
+func getBoolPtr(params map[string]any, key string) *bool {
 	if val, ok := params[key]; ok {
 		if b, ok := val.(bool); ok {
 			return &b
@@ -186,158 +172,91 @@ func convertSilence(s *ammodels.GettableSilence) Silence {
 	}
 }
 
-func BuildListMetricsInput(args map[string]any) ListMetricsInput {
-	return ListMetricsInput{
-		NameRegex: GetString(args, "name_regex", ""),
-	}
-}
-
-func BuildInstantQueryInput(args map[string]any) InstantQueryInput {
-	return InstantQueryInput{
-		Query: GetString(args, "query", ""),
-		Time:  GetString(args, "time", ""),
-	}
-}
-
-func BuildRangeQueryInput(args map[string]any) RangeQueryInput {
-	return RangeQueryInput{
-		Query:    GetString(args, "query", ""),
-		Step:     GetString(args, "step", ""),
-		Start:    GetString(args, "start", ""),
-		End:      GetString(args, "end", ""),
-		Duration: GetString(args, "duration", ""),
-	}
-}
-
-func BuildShowTimeseriesInput(args map[string]any) ShowTimeseriesInput {
-	return ShowTimeseriesInput{
-		RangeQueryInput: BuildRangeQueryInput(args),
-		Title:           GetString(args, "title", ""),
-		Description:     GetString(args, "description", ""),
-	}
-}
-
-func BuildLabelNamesInput(args map[string]any) LabelNamesInput {
-	return LabelNamesInput{
-		Metric: GetString(args, "metric", ""),
-		Start:  GetString(args, "start", ""),
-		End:    GetString(args, "end", ""),
-	}
-}
-
-func BuildLabelValuesInput(args map[string]any) LabelValuesInput {
-	return LabelValuesInput{
-		Label:  GetString(args, "label", ""),
-		Metric: GetString(args, "metric", ""),
-		Start:  GetString(args, "start", ""),
-		End:    GetString(args, "end", ""),
-	}
-}
-
-func BuildSeriesInput(args map[string]any) SeriesInput {
-	return SeriesInput{
-		Matches: GetString(args, "matches", ""),
-		Start:   GetString(args, "start", ""),
-		End:     GetString(args, "end", ""),
-	}
-}
-
-func BuildAlertsInput(args map[string]any) AlertsInput {
-	return AlertsInput{
-		Active:      GetBoolPtr(args, "active"),
-		Silenced:    GetBoolPtr(args, "silenced"),
-		Inhibited:   GetBoolPtr(args, "inhibited"),
-		Unprocessed: GetBoolPtr(args, "unprocessed"),
-		Filter:      GetString(args, "filter", ""),
-		Receiver:    GetString(args, "receiver", ""),
-	}
-}
-
-func BuildSilencesInput(args map[string]any) SilencesInput {
-	return SilencesInput{
-		Filter: GetString(args, "filter", ""),
-	}
-}
-
-// ListMetricsHandler handles the listing of available Prometheus metrics.
-func ListMetricsHandler(ctx context.Context, promClient prometheus.Loader, input ListMetricsInput) *resultutil.Result {
-	slog.Info("ListMetricsHandler called")
-	slog.Debug("ListMetricsHandler params", "input", input)
-
+// listMetrics handles the listing of available Prometheus metrics.
+func listMetrics(ctx context.Context, promClient prometheus.Loader, args map[string]any) (*api.ToolCallResult, error) {
 	// Validate required parameters
-	if input.NameRegex == "" {
-		return resultutil.NewErrorResult(fmt.Errorf("name_regex parameter is required and must be a string"))
+	nameRegex := getString(args, "name_regex", "")
+	if nameRegex == "" {
+		return api.NewToolCallResult("", fmt.Errorf("name_regex parameter is required and must be a string")), nil
 	}
 
-	metrics, err := promClient.ListMetrics(ctx, input.NameRegex)
+	metrics, err := promClient.ListMetrics(ctx, nameRegex)
 	if err != nil {
 		slog.Error("failed to list metrics", "error", err)
-		return resultutil.NewErrorResult(fmt.Errorf("failed to list metrics: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("failed to list metrics: %w", err)), nil
 	}
 
-	slog.Info("ListMetricsHandler executed successfully", "resultLength", len(metrics))
-	slog.Debug("ListMetricsHandler results", "results", metrics)
-
-	output := ListMetricsOutput{Metrics: metrics}
-	return resultutil.NewSuccessResult(output)
+	slog.Info("listMetricsHandler executed successfully", "resultLength", len(metrics))
+	return api.NewToolCallResultStructured(ListMetricsOutput{Metrics: metrics}, nil), nil
 }
 
-// ExecuteRangeQueryHandler handles the execution of Prometheus range queries.
-func ExecuteRangeQueryHandler(ctx context.Context, promClient prometheus.Loader, input RangeQueryInput, fullResponse bool) *resultutil.Result {
-	slog.Info("ExecuteRangeQueryHandler called")
-	slog.Debug("ExecuteRangeQueryHandler params", "input", input)
+func listMetricsHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("listMetricsHandler called")
 
-	// Validate required parameters
-	if input.Query == "" {
-		return resultutil.NewErrorResult(fmt.Errorf("query parameter is required and must be a string"))
+	promClient, err := getPromClient(params)
+	if err != nil {
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Prometheus client: %w", err)), nil
 	}
-	if input.Step == "" {
-		return resultutil.NewErrorResult(fmt.Errorf("step parameter is required and must be a string"))
+
+	return listMetrics(params.Context, promClient, params.GetArguments())
+}
+
+// executeRangeQuery handles the execution of Prometheus range queries.
+func executeRangeQuery(ctx context.Context, promClient prometheus.Loader, args map[string]any, fullResponse bool) (*api.ToolCallResult, error) {
+	// Validate required parameters
+	query := getString(args, "query", "")
+	step := getString(args, "step", "")
+	start := getString(args, "start", "")
+	end := getString(args, "end", "")
+	duration := getString(args, "duration", "")
+
+	if query == "" {
+		return api.NewToolCallResult("", fmt.Errorf("query parameter is required and must be a string")), nil
+	}
+	if step == "" {
+		return api.NewToolCallResult("", fmt.Errorf("step parameter is required and must be a string")), nil
 	}
 
 	// Parse step duration
-	stepDuration, err := model.ParseDuration(input.Step)
+	stepDuration, err := model.ParseDuration(step)
 	if err != nil {
-		return resultutil.NewErrorResult(fmt.Errorf("invalid step format: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("invalid step format: %w", err)), nil
 	}
 
-	if (input.Start == "") != (input.End == "") {
-		return resultutil.NewErrorResult(fmt.Errorf("both start and end must be provided together"))
+	if (start == "") != (end == "") {
+		return api.NewToolCallResult("", fmt.Errorf("both start and end must be provided together")), nil
 	}
 
 	var startTime, endTime time.Time
 
-	if input.Start != "" && input.End != "" {
+	if start != "" && end != "" {
 		// Handle explicit start/end times
-		startTime, err = prometheus.ParseTimestamp(input.Start)
+		startTime, err = prometheus.ParseTimestamp(start)
 		if err != nil {
-			return resultutil.NewErrorResult(fmt.Errorf("invalid start time format: %w", err))
+			return api.NewToolCallResult("", fmt.Errorf("invalid start time format: %w", err)), nil
 		}
-
-		endTime, err = prometheus.ParseTimestamp(input.End)
+		endTime, err = prometheus.ParseTimestamp(end)
 		if err != nil {
-			return resultutil.NewErrorResult(fmt.Errorf("invalid end time format: %w", err))
+			return api.NewToolCallResult("", fmt.Errorf("invalid end time format: %w", err)), nil
 		}
 	} else {
 		// Handle duration-based query (default to 1h if nothing specified)
-		durationStr := input.Duration
+		durationStr := duration
 		if durationStr == "" {
 			durationStr = "1h"
 		}
-
-		duration, err := model.ParseDuration(durationStr)
+		dur, err := model.ParseDuration(durationStr)
 		if err != nil {
-			return resultutil.NewErrorResult(fmt.Errorf("invalid duration format: %w", err))
+			return api.NewToolCallResult("", fmt.Errorf("invalid duration format: %w", err)), nil
 		}
-
 		endTime = time.Now()
-		startTime = endTime.Add(-time.Duration(duration))
+		startTime = endTime.Add(-time.Duration(dur))
 	}
 
 	// Execute the range query
-	result, err := promClient.ExecuteRangeQuery(ctx, input.Query, startTime, endTime, time.Duration(stepDuration))
+	result, err := promClient.ExecuteRangeQuery(ctx, query, startTime, endTime, time.Duration(stepDuration))
 	if err != nil {
-		return resultutil.NewErrorResult(fmt.Errorf("failed to execute range query: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("failed to execute range query: %w", err)), nil
 	}
 
 	// Convert to structured output
@@ -347,7 +266,7 @@ func ExecuteRangeQueryHandler(ctx context.Context, promClient prometheus.Loader,
 
 	resMatrix, ok := result["result"].(model.Matrix)
 	if ok {
-		slog.Info("ExecuteRangeQueryHandler executed successfully", "resultLength", resMatrix.Len())
+		slog.Info("executeRangeQuery executed successfully", "resultLength", resMatrix.Len())
 
 		if fullResponse {
 			// Return full data
@@ -373,58 +292,75 @@ func ExecuteRangeQueryHandler(ctx context.Context, promClient prometheus.Loader,
 				output.Summary[i] = CalculateSeriesSummary(series.Metric, series.Values)
 			}
 		}
-
-		slog.Debug("ExecuteRangeQueryHandler output", "output", output)
 	} else {
-		slog.Info("ExecuteRangeQueryHandler executed successfully (unknown format)", "result", result)
+		slog.Info("executeRangeQuery executed successfully (unknown format)", "result", result)
 	}
 
 	if warnings, ok := result["warnings"].([]string); ok {
 		output.Warnings = warnings
 	}
 
-	return resultutil.NewSuccessResult(output)
+	return api.NewToolCallResultStructured(output, nil), nil
 }
 
-// ShowTimeseriesHandler handles the show_timeseries tool, returning full range query data for chart rendering.
-func ShowTimeseriesHandler(ctx context.Context, promClient prometheus.Loader, input ShowTimeseriesInput) *resultutil.Result {
-	slog.Info("ShowTimeseriesHandler called")
-	slog.Debug("ShowTimeseriesHandler params", "input", input)
+func executeRangeQueryHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("executeRangeQueryHandler called")
+
+	promClient, err := getPromClient(params)
+	if err != nil {
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Prometheus client: %w", err)), nil
+	}
+
+	cfg := getConfig(params)
+	return executeRangeQuery(params.Context, promClient, params.GetArguments(), cfg.RangeQueryFullResponse)
+}
+
+// showTimeseriesHandler handles the show_timeseries tool, validating the query for UI chart rendering.
+func showTimeseriesHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("showTimeseriesHandler called")
+
+	promClient, err := getPromClient(params)
+	if err != nil {
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Prometheus client: %w", err)), nil
+	}
 
 	// Executing the query handler just to validate the query is correct.
-	result := ExecuteRangeQueryHandler(ctx, promClient, input.RangeQueryInput, true)
+	result, err := executeRangeQuery(params.Context, promClient, params.GetArguments(), true)
+	if err != nil {
+		return result, err
+	}
 	if result.Error != nil {
-		return result
+		return result, nil //nolint:nilerr // result carries the MCP-level error; the Go error is intentionally nil
 	}
 
-	return resultutil.NewSuccessResult(struct{}{})
+	// For UI purposes only, no additional data to be sent to the LLM context.
+	return api.NewToolCallResultStructured(struct{}{}, nil), nil
 }
 
-// ExecuteInstantQueryHandler handles the execution of Prometheus instant queries.
-func ExecuteInstantQueryHandler(ctx context.Context, promClient prometheus.Loader, input InstantQueryInput) *resultutil.Result {
-	slog.Info("ExecuteInstantQueryHandler called")
-	slog.Debug("ExecuteInstantQueryHandler params", "input", input)
-
+// executeInstantQuery handles the execution of Prometheus instant queries.
+func executeInstantQuery(ctx context.Context, promClient prometheus.Loader, args map[string]any) (*api.ToolCallResult, error) {
 	// Validate required parameters
-	if input.Query == "" {
-		return resultutil.NewErrorResult(fmt.Errorf("query parameter is required and must be a string"))
+	query := getString(args, "query", "")
+	if query == "" {
+		return api.NewToolCallResult("", fmt.Errorf("query parameter is required and must be a string")), nil
 	}
 
+	timeStr := getString(args, "time", "")
 	var queryTime time.Time
 	var err error
-	if input.Time == "" {
+	if timeStr == "" {
 		queryTime = time.Now()
 	} else {
-		queryTime, err = prometheus.ParseTimestamp(input.Time)
+		queryTime, err = prometheus.ParseTimestamp(timeStr)
 		if err != nil {
-			return resultutil.NewErrorResult(fmt.Errorf("invalid time format: %w", err))
+			return api.NewToolCallResult("", fmt.Errorf("invalid time format: %w", err)), nil
 		}
 	}
 
 	// Execute the instant query
-	result, err := promClient.ExecuteInstantQuery(ctx, input.Query, queryTime)
+	result, err := promClient.ExecuteInstantQuery(ctx, query, queryTime)
 	if err != nil {
-		return resultutil.NewErrorResult(fmt.Errorf("failed to execute instant query: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("failed to execute instant query: %w", err)), nil
 	}
 
 	// Convert to structured output
@@ -434,8 +370,7 @@ func ExecuteInstantQueryHandler(ctx context.Context, promClient prometheus.Loade
 
 	resVector, ok := result["result"].(model.Vector)
 	if ok {
-		slog.Info("ExecuteInstantQueryHandler executed successfully", "resultLength", len(resVector))
-		slog.Debug("ExecuteInstantQueryHandler results", "results", resVector)
+		slog.Info("executeInstantQueryHandler executed successfully", "resultLength", len(resVector))
 
 		output.Result = make([]InstantResult, len(resVector))
 		for i, sample := range resVector {
@@ -449,112 +384,151 @@ func ExecuteInstantQueryHandler(ctx context.Context, promClient prometheus.Loade
 			}
 		}
 	} else {
-		slog.Info("ExecuteInstantQueryHandler executed successfully (unknown format)", "result", result)
+		slog.Info("executeInstantQueryHandler executed successfully (unknown format)", "result", result)
 	}
 
 	if warnings, ok := result["warnings"].([]string); ok {
 		output.Warnings = warnings
 	}
 
-	return resultutil.NewSuccessResult(output)
+	return api.NewToolCallResultStructured(output, nil), nil
 }
 
-// GetLabelNamesHandler handles the retrieval of label names.
-func GetLabelNamesHandler(ctx context.Context, promClient prometheus.Loader, input LabelNamesInput) *resultutil.Result {
-	slog.Info("GetLabelNamesHandler called")
-	slog.Debug("GetLabelNamesHandler params", "input", input)
+func executeInstantQueryHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("executeInstantQueryHandler called")
 
-	startTime, endTime, err := parseDefaultTimeRange(input.Start, input.End)
+	promClient, err := getPromClient(params)
 	if err != nil {
-		return resultutil.NewErrorResult(err)
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Prometheus client: %w", err)), nil
+	}
+
+	return executeInstantQuery(params.Context, promClient, params.GetArguments())
+}
+
+// getLabelNames handles the retrieval of label names.
+func getLabelNames(ctx context.Context, promClient prometheus.Loader, args map[string]any) (*api.ToolCallResult, error) {
+	metric := getString(args, "metric", "")
+	start := getString(args, "start", "")
+	end := getString(args, "end", "")
+
+	startTime, endTime, err := parseDefaultTimeRange(start, end)
+	if err != nil {
+		return api.NewToolCallResult("", err), nil
 	}
 
 	// Get label names
-	labels, err := promClient.GetLabelNames(ctx, input.Metric, startTime, endTime)
+	labels, err := promClient.GetLabelNames(ctx, metric, startTime, endTime)
 	if err != nil {
-		return resultutil.NewErrorResult(fmt.Errorf("failed to get label names: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("failed to get label names: %w", err)), nil
 	}
 
-	slog.Info("GetLabelNamesHandler executed successfully", "labelCount", len(labels))
-	slog.Debug("GetLabelNamesHandler results", "results", labels)
-
-	output := LabelNamesOutput{Labels: labels}
-	return resultutil.NewSuccessResult(output)
+	slog.Info("getLabelNamesHandler executed successfully", "labelCount", len(labels))
+	return api.NewToolCallResultStructured(LabelNamesOutput{Labels: labels}, nil), nil
 }
 
-// GetLabelValuesHandler handles the retrieval of label values.
-func GetLabelValuesHandler(ctx context.Context, promClient prometheus.Loader, input LabelValuesInput) *resultutil.Result {
-	slog.Info("GetLabelValuesHandler called")
-	slog.Debug("GetLabelValuesHandler params", "input", input)
+func getLabelNamesHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("getLabelNamesHandler called")
 
-	// Validate required parameters
-	if input.Label == "" {
-		return resultutil.NewErrorResult(fmt.Errorf("label parameter is required and must be a string"))
+	promClient, err := getPromClient(params)
+	if err != nil {
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Prometheus client: %w", err)), nil
 	}
 
-	startTime, endTime, err := parseDefaultTimeRange(input.Start, input.End)
+	return getLabelNames(params.Context, promClient, params.GetArguments())
+}
+
+// getLabelValues handles the retrieval of label values.
+func getLabelValues(ctx context.Context, promClient prometheus.Loader, args map[string]any) (*api.ToolCallResult, error) {
+	// Validate required parameters
+	label := getString(args, "label", "")
+	if label == "" {
+		return api.NewToolCallResult("", fmt.Errorf("label parameter is required and must be a string")), nil
+	}
+
+	metric := getString(args, "metric", "")
+	start := getString(args, "start", "")
+	end := getString(args, "end", "")
+
+	startTime, endTime, err := parseDefaultTimeRange(start, end)
 	if err != nil {
-		return resultutil.NewErrorResult(err)
+		return api.NewToolCallResult("", err), nil
 	}
 
 	// Get label values
-	values, err := promClient.GetLabelValues(ctx, input.Label, input.Metric, startTime, endTime)
+	values, err := promClient.GetLabelValues(ctx, label, metric, startTime, endTime)
 	if err != nil {
-		return resultutil.NewErrorResult(fmt.Errorf("failed to get label values: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("failed to get label values: %w", err)), nil
 	}
 
-	slog.Info("GetLabelValuesHandler executed successfully", "valueCount", len(values))
-	slog.Debug("GetLabelValuesHandler results", "results", values)
-
-	output := LabelValuesOutput{Values: values}
-	return resultutil.NewSuccessResult(output)
+	slog.Info("getLabelValuesHandler executed successfully", "valueCount", len(values))
+	return api.NewToolCallResultStructured(LabelValuesOutput{Values: values}, nil), nil
 }
 
-// GetSeriesHandler handles the retrieval of time series.
-func GetSeriesHandler(ctx context.Context, promClient prometheus.Loader, input SeriesInput) *resultutil.Result {
-	slog.Info("GetSeriesHandler called")
-	slog.Debug("GetSeriesHandler params", "input", input)
+func getLabelValuesHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("getLabelValuesHandler called")
 
-	// Validate required parameters
-	if input.Matches == "" {
-		return resultutil.NewErrorResult(fmt.Errorf("matches parameter is required and must be a string"))
+	promClient, err := getPromClient(params)
+	if err != nil {
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Prometheus client: %w", err)), nil
 	}
 
-	// Parse matches - could be comma-separated
-	matches := []string{input.Matches}
-	// If it contains comma outside of braces, split it
-	// For simplicity, treat the entire string as one match for now
-	// Users can make multiple calls if needed
+	return getLabelValues(params.Context, promClient, params.GetArguments())
+}
 
-	startTime, endTime, err := parseDefaultTimeRange(input.Start, input.End)
+// getSeries handles the retrieval of time series.
+func getSeries(ctx context.Context, promClient prometheus.Loader, args map[string]any) (*api.ToolCallResult, error) {
+	// Validate required parameters
+	matchesStr := getString(args, "matches", "")
+	if matchesStr == "" {
+		return api.NewToolCallResult("", fmt.Errorf("matches parameter is required and must be a string")), nil
+	}
+
+	matches := []string{matchesStr}
+	start := getString(args, "start", "")
+	end := getString(args, "end", "")
+
+	startTime, endTime, err := parseDefaultTimeRange(start, end)
 	if err != nil {
-		return resultutil.NewErrorResult(err)
+		return api.NewToolCallResult("", err), nil
 	}
 
 	// Get series
 	series, err := promClient.GetSeries(ctx, matches, startTime, endTime)
 	if err != nil {
-		return resultutil.NewErrorResult(fmt.Errorf("failed to get series: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("failed to get series: %w", err)), nil
 	}
 
-	slog.Info("GetSeriesHandler executed successfully", "cardinality", len(series))
-	slog.Debug("GetSeriesHandler results", "results", series)
-
-	output := SeriesOutput{
+	slog.Info("getSeriesHandler executed successfully", "cardinality", len(series))
+	return api.NewToolCallResultStructured(SeriesOutput{
 		Series:      series,
 		Cardinality: len(series),
-	}
-	return resultutil.NewSuccessResult(output)
+	}, nil), nil
 }
 
-// GetAlertsHandler handles the retrieval of alerts from Alertmanager.
-func GetAlertsHandler(ctx context.Context, amClient alertmanager.Loader, input AlertsInput) *resultutil.Result {
-	slog.Info("GetAlertsHandler called")
-	slog.Debug("GetAlertsHandler params", "input", input)
+func getSeriesHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("getSeriesHandler called")
 
-	alerts, err := amClient.GetAlerts(ctx, input.Active, input.Silenced, input.Inhibited, input.Unprocessed, parseFilterString(input.Filter), input.Receiver)
+	promClient, err := getPromClient(params)
 	if err != nil {
-		return resultutil.NewErrorResult(fmt.Errorf("failed to get alerts: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Prometheus client: %w", err)), nil
+	}
+
+	return getSeries(params.Context, promClient, params.GetArguments())
+}
+
+// getAlerts handles the retrieval of alerts from Alertmanager.
+func getAlerts(ctx context.Context, amClient alertmanager.Loader, args map[string]any) (*api.ToolCallResult, error) {
+	alerts, err := amClient.GetAlerts(
+		ctx,
+		getBoolPtr(args, "active"),
+		getBoolPtr(args, "silenced"),
+		getBoolPtr(args, "inhibited"),
+		getBoolPtr(args, "unprocessed"),
+		parseFilterString(getString(args, "filter", "")),
+		getString(args, "receiver", ""),
+	)
+	if err != nil {
+		return api.NewToolCallResult("", fmt.Errorf("failed to get alerts: %w", err)), nil
 	}
 
 	output := AlertsOutput{
@@ -564,20 +538,26 @@ func GetAlertsHandler(ctx context.Context, amClient alertmanager.Loader, input A
 		output.Alerts[i] = convertAlert(alert)
 	}
 
-	slog.Info("GetAlertsHandler executed successfully", "alertCount", len(alerts))
-	slog.Debug("GetAlertsHandler results", "results", output.Alerts)
-
-	return resultutil.NewSuccessResult(output)
+	slog.Info("getAlertsHandler executed successfully", "alertCount", len(alerts))
+	return api.NewToolCallResultStructured(output, nil), nil
 }
 
-// GetSilencesHandler handles the retrieval of silences from Alertmanager.
-func GetSilencesHandler(ctx context.Context, amClient alertmanager.Loader, input SilencesInput) *resultutil.Result {
-	slog.Info("GetSilencesHandler called")
-	slog.Debug("GetSilencesHandler params", "input", input)
+func getAlertsHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("getAlertsHandler called")
 
-	silences, err := amClient.GetSilences(ctx, parseFilterString(input.Filter))
+	amClient, err := getAlertmanagerClient(params)
 	if err != nil {
-		return resultutil.NewErrorResult(fmt.Errorf("failed to get silences: %w", err))
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Alertmanager client: %w", err)), nil
+	}
+
+	return getAlerts(params.Context, amClient, params.GetArguments())
+}
+
+// getSilences handles the retrieval of silences from Alertmanager.
+func getSilences(ctx context.Context, amClient alertmanager.Loader, args map[string]any) (*api.ToolCallResult, error) {
+	silences, err := amClient.GetSilences(ctx, parseFilterString(getString(args, "filter", "")))
+	if err != nil {
+		return api.NewToolCallResult("", fmt.Errorf("failed to get silences: %w", err)), nil
 	}
 
 	output := SilencesOutput{
@@ -587,8 +567,17 @@ func GetSilencesHandler(ctx context.Context, amClient alertmanager.Loader, input
 		output.Silences[i] = convertSilence(silence)
 	}
 
-	slog.Info("GetSilencesHandler executed successfully", "silenceCount", len(silences))
-	slog.Debug("GetSilencesHandler results", "results", output.Silences)
+	slog.Info("getSilencesHandler executed successfully", "silenceCount", len(silences))
+	return api.NewToolCallResultStructured(output, nil), nil
+}
 
-	return resultutil.NewSuccessResult(output)
+func getSilencesHandler(params api.ToolHandlerParams) (*api.ToolCallResult, error) {
+	slog.Info("getSilencesHandler called")
+
+	amClient, err := getAlertmanagerClient(params)
+	if err != nil {
+		return api.NewToolCallResult("", fmt.Errorf("failed to create Alertmanager client: %w", err)), nil
+	}
+
+	return getSilences(params.Context, amClient, params.GetArguments())
 }
